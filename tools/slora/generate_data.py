@@ -125,9 +125,97 @@ def generate_trace(
     print(f"Generated trace at {output_path} with {num_requests} requests.")
     print(f"Hot Ratio: {num_hot/num_requests:.2%}")
 
+def generate_real_trace(
+    output_path: str,
+    num_requests: int,
+    hot_adapter_name: str,
+    cold_adapter_names: list,
+    hot_ratio: float = 0.98
+):
+    """
+    Generates a trace file using real dataset lengths (Alpaca, OASST1, CodeAlpaca).
+    Requires 'datasets' library.
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        print("Error: 'datasets' library not found. Please install it with `pip install datasets`.")
+        return
+
+    print("Loading real datasets (Alpaca, OASST1, CodeAlpaca)...")
+    
+    # Load datasets (using small subsets or streaming if possible to be fast)
+    # For simplicity, we'll load a few examples.
+    
+    # 1. Alpaca (Hot)
+    ds_alpaca = load_dataset("tatsu-lab/alpaca", split="train", streaming=True)
+    alpaca_iter = iter(ds_alpaca)
+    
+    # 2. OASST1 (Cold 1)
+    ds_oasst = load_dataset("OpenAssistant/oasst1", split="train", streaming=True)
+    oasst_iter = iter(ds_oasst)
+    
+    # 3. CodeAlpaca (Cold 2)
+    ds_code = load_dataset("sahil2801/CodeAlpaca-20k", split="train", streaming=True)
+    code_iter = iter(ds_code)
+    
+    requests = []
+    num_hot = int(num_requests * hot_ratio)
+    num_cold = num_requests - num_hot
+    
+    # Helper to estimate token length (rough char count / 4)
+    def est_len(text):
+        return max(16, len(text) // 4)
+
+    print(f"Generating {num_hot} hot requests (Alpaca)...")
+    for i in range(num_hot):
+        try:
+            item = next(alpaca_iter)
+            prompt = item['instruction'] + "\n" + item['input']
+            output = item['output']
+            requests.append({
+                "prompt_len": est_len(prompt),
+                "output_len": est_len(output),
+                "lora_name": hot_adapter_name,
+                "req_id": i
+            })
+        except StopIteration:
+            alpaca_iter = iter(ds_alpaca) # Reset if exhausted
+            
+    print(f"Generating {num_cold} cold requests (OASST1/CodeAlpaca)...")
+    for i in range(num_cold):
+        cold_name = np.random.choice(cold_adapter_names)
+        try:
+            if "oasst" in cold_name:
+                item = next(oasst_iter)
+                prompt = item['text'] # OASST structure is complex, simplifying
+                output = "Response" 
+            else:
+                item = next(code_iter)
+                prompt = item['instruction'] + "\n" + item['input']
+                output = item['output']
+                
+            requests.append({
+                "prompt_len": est_len(prompt),
+                "output_len": est_len(output),
+                "lora_name": cold_name,
+                "req_id": num_hot + i
+            })
+        except StopIteration:
+             # Fallback if exhausted
+             pass
+
+    np.random.shuffle(requests)
+    
+    with open(output_path, 'w') as f:
+        for req in requests:
+            f.write(json.dumps(req) + "\n")
+            
+    print(f"Generated REAL trace at {output_path} with {len(requests)} requests.")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--action", type=str, required=True, choices=["lora", "trace"])
+    parser.add_argument("--action", type=str, required=True, choices=["lora", "trace", "real_trace"])
     parser.add_argument("--output", type=str, required=True)
     
     # Lora args
@@ -139,7 +227,7 @@ if __name__ == "__main__":
     parser.add_argument("--hot_name", type=str, default="lora_hot")
     parser.add_argument("--cold_names", type=str, nargs="+", default=["lora_cold_1", "lora_cold_2"])
     parser.add_argument("--hot_ratio", type=float, default=0.98)
-    parser.add_argument("--real_lengths", action="store_true", help="Use realistic length distribution")
+    parser.add_argument("--real_lengths", action="store_true", help="Use realistic length distribution (LogNormal)")
     
     args = parser.parse_args()
     
@@ -147,3 +235,5 @@ if __name__ == "__main__":
         generate_dummy_lora(args.output, args.rank, ["q_proj", "v_proj"], args.base_model)
     elif args.action == "trace":
         generate_trace(args.output, args.num_reqs, args.hot_name, args.cold_names, args.hot_ratio, use_real_lengths=args.real_lengths)
+    elif args.action == "real_trace":
+        generate_real_trace(args.output, args.num_reqs, args.hot_name, args.cold_names, args.hot_ratio)
