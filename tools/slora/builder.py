@@ -33,14 +33,46 @@ class SLoRABuilder:
         print(f"Saving fused model to {save_path}...")
         model.save_pretrained(save_path)
         
-        # Copy tokenizer as well
+        # Copy tokenizer files manually to avoid loading issues
+        print("Copying tokenizer files...")
+        tokenizer_files = ["tokenizer.model", "tokenizer_config.json", "special_tokens_map.json", "added_tokens.json"]
+        for filename in tokenizer_files:
+            src = os.path.join(self.base_model_path, filename)
+            dst = os.path.join(save_path, filename)
+            if os.path.exists(src):
+                shutil.copy2(src, dst)
+            else:
+                print(f"Note: {filename} not found in base model, skipping.")
+        
+        # Explicitly save tokenizer config to ensure it's valid JSON
         try:
             tokenizer = AutoTokenizer.from_pretrained(self.base_model_path)
-            tokenizer.save_pretrained(save_path)
-        except Exception as e:
-            print(f"Warning: Could not save tokenizer: {e}")
+            # Force legacy=False to avoid fast tokenizer issues if possible, or just save config
+            # Manually construct a minimal valid config if needed, but let's try dumping init_kwargs first
+            config_dict = tokenizer.init_kwargs
+            # Ensure it has model_type if missing
+            if "model_type" not in config_dict:
+                config_dict["model_type"] = "llama"
             
+            with open(os.path.join(save_path, "tokenizer_config.json"), 'w') as f:
+                json.dump(config_dict, f, indent=2)
+            print("Regenerated tokenizer_config.json")
+        except Exception as e:
+            print(f"Warning: Could not regenerate tokenizer config: {e}")
+            # Fallback: Create a minimal valid tokenizer_config.json
+            print("Creating minimal fallback tokenizer_config.json...")
+            with open(os.path.join(save_path, "tokenizer_config.json"), 'w') as f:
+                json.dump({"model_type": "llama", "tokenizer_class": "LlamaTokenizer"}, f)
+
         print("Done.")
+
+    def _load_weights(self, path: str):
+        if os.path.exists(os.path.join(path, "adapter_model.safetensors")):
+            return load_file(os.path.join(path, "adapter_model.safetensors"))
+        elif os.path.exists(os.path.join(path, "adapter_model.bin")):
+            return torch.load(os.path.join(path, "adapter_model.bin"), map_location="cpu")
+        else:
+            raise FileNotFoundError(f"No adapter_model.safetensors or adapter_model.bin found in {path}")
 
     def build_delta_lora(self, hot_lora_path: str, cold_lora_path: str, save_path: str):
         """
@@ -57,9 +89,8 @@ class SLoRABuilder:
         # Here we assume they are trained on the same base model with same targets.
             
         # 2. Load Weights
-        # We assume safetensors. If bin, use torch.load
-        hot_weights = load_file(os.path.join(hot_lora_path, "adapter_model.safetensors"))
-        cold_weights = load_file(os.path.join(cold_lora_path, "adapter_model.safetensors"))
+        hot_weights = self._load_weights(hot_lora_path)
+        cold_weights = self._load_weights(cold_lora_path)
         
         delta_weights = {}
         

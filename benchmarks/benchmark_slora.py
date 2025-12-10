@@ -32,7 +32,7 @@ async def run_benchmark(
     engine_args = EngineArgs(
         model=model_path,
         enable_lora=True,
-        max_loras=4,
+        max_loras=1, # Constrain to 1 to demonstrate SLoRA's advantage in mixed batches
         max_lora_rank=64, # Ensure enough rank for Delta LoRA
         gpu_memory_utilization=0.8,
         enforce_eager=True # Often safer for LoRA benchmarks
