@@ -8,11 +8,11 @@ Example:
     python benchmarks/multi_lora/benchmark_lora_popularity.py \
         --base-model baffo32/decapoda-research-llama-7B-hf \
         --tokenizer huggyllama/llama-7b \
-        --hot-adapter apaca-lora \
-        --cold-adapters wizard-lora guanaco-lora \
-        --hot-ratio 0.7 \
+        --hot-adapter hot-lora \
+        --cold-adapters cold-lora1 cold-lora2 \
+        --hot-ratio 0.0 \
         --request-rate 10 \
-        --num-requests 200 \
+        --num-requests 20 \
         --trust-remote-code \
         --ignore-eos \
         --save_results \
@@ -21,7 +21,6 @@ Example:
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import uuid
 import json
 import argparse
 import asyncio
@@ -100,19 +99,22 @@ def sample_requests(
     requests: list[SampleRequest] = []
     rng = random.Random(args.seed)
     
-    def choose_adapter(hot_ratio, hot_adapter, cold_adapters):
-        if rng.random() < hot_ratio:
-            return hot_adapter
-        return cold_adapters[rng.randrange(len(cold_adapters))]
+    def choose_adapter():
+        if rng.random() < args.hot_ratio:
+            return args.hot_adapter
+        return args.cold_adapters[rng.randrange(len(args.cold_adapters))]
+    
+    # Use seeded random for unique ID instead of uuid
+    def generate_unique_id():
+        return ''.join(rng.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=16))
     
     for i in range(args.num_requests):
-        adapter_name = choose_adapter(args.hot_ratio, args.hot_adapter, args.cold_adapters)
-        unique_id = str(uuid.uuid4())
+        adapter_name = choose_adapter()
+        unique_id = generate_unique_id()
         base_text = "Hello " * (args.prompt_len - 10)
         prompt = f"{unique_id} {base_text}"
-        # prompt = "Hello " * (args.prompt_len // 2)
         request = SampleRequest(
-                model_name=choose_adapter(args.hot_ratio, args.hot_adapter, args.cold_adapters),  # noqa: E501
+                model_name=adapter_name,
                 prompt=prompt,
                 prompt_len=len(tokenizer(prompt)['input_ids']),
                 expected_output_len=args.output_len,
@@ -369,34 +371,18 @@ async def benchmark(
     print(f"Using cold adapters: {cold_adapters}")
     print(f"Using hot ratio: {hot_ratio}\n")
 
-    print("Starting initial single prompt test run...")
-
-    test_request = input_requests[0]
-    test_input = RequestFuncInput(
-        model=test_request.model_name,
-        prompt=test_request.prompt,
-        api_url=api_url,
-        prompt_len=test_request.prompt_len,
-        output_len=test_request.expected_output_len,
-        ignore_eos=ignore_eos,
-    )
-    test_output = await request_func(request_func_input=test_input)
-    if not test_output.success:
-        raise ValueError(
-            "Initial test run failed - Please make sure benchmark arguments "
-            f"are correctly specified. Error: {test_output.error}"
-        )
-    else:
-        print("Initial test run completed. Starting main benchmark run...")
+    # No warmup - directly start benchmark to measure cold-start latency
+    print("Starting benchmark (no warmup)...")
 
     if profile:
         print("Starting profiler...")
+        first_request = input_requests[0]
         profile_input = RequestFuncInput(
-            model=test_request.model_name,
-            prompt=test_request.prompt,
+            model=first_request.model_name,
+            prompt=first_request.prompt,
             api_url=base_url + "/start_profile",
-            prompt_len=test_request.prompt_len,
-            output_len=test_request.expected_output_len,
+            prompt_len=first_request.prompt_len,
+            output_len=first_request.expected_output_len,
             ignore_eos=ignore_eos,
         )
         profile_output = await request_func(request_func_input=profile_input)
