@@ -9,13 +9,13 @@ set -e  # Exit on error
 BASE_MODEL="baffo32/decapoda-research-llama-7B-hf"
 TOKENIZER="huggyllama/llama-7b"
 HOT_ADAPTER="apaca-lora"
-COLD_ADAPTERS="guanaco-lora wizard-lora"
+COLD_ADAPTERS="wizard-lora guanaco-lora"
 
 # Test parameters
 NUM_REQUESTS=200
 PROMPT_LEN=400
 OUTPUT_LEN=128
-REQUEST_RATE="inf"  # Use "inf" for max throughput, or set a specific rate like "10"
+REQUEST_RATE="10"  # Use "inf" for max throughput, or set a specific rate like "10"
 
 # Server configuration
 HOST="127.0.0.1"
@@ -68,6 +68,7 @@ for HOT_RATIO in "${HOT_RATIOS[@]}"; do
         --host "${HOST}" \
         --port "${PORT}" \
         --trust-remote-code \
+        --ignore-eos \
         --save-results \
         --result-dir "${RESULT_DIR}" \
         --result-filename "${RESULT_FILENAME}"

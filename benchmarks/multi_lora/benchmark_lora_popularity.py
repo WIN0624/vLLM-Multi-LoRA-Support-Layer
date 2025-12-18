@@ -9,10 +9,12 @@ Example:
         --base-model baffo32/decapoda-research-llama-7B-hf \
         --tokenizer huggyllama/llama-7b \
         --hot-adapter apaca-lora \
-        --cold-adapters guanaco-lora wizard-lora \
+        --cold-adapters wizard-lora guanaco-lora \
         --hot-ratio 0.7 \
+        --request-rate 10 \
         --num-requests 200 \
         --trust-remote-code \
+        --ignore-eos \
         --save_results \
         --result-dir benchmarks/multi_lora/test_results
 """
@@ -104,14 +106,15 @@ def sample_requests(
         return cold_adapters[rng.randrange(len(cold_adapters))]
     
     for i in range(args.num_requests):
-        # unique_id = str(uuid.uuid4())
-        # base_text = "benchmark " * (args.prompt_len - 10)
-        # prompt = f"{unique_id} {base_text}"
-        prompt = "Hello " * (args.prompt_len // 2)
+        adapter_name = choose_adapter(args.hot_ratio, args.hot_adapter, args.cold_adapters)
+        unique_id = str(uuid.uuid4())
+        base_text = "Hello " * (args.prompt_len - 10)
+        prompt = f"{unique_id} {base_text}"
+        # prompt = "Hello " * (args.prompt_len // 2)
         request = SampleRequest(
                 model_name=choose_adapter(args.hot_ratio, args.hot_adapter, args.cold_adapters),  # noqa: E501
                 prompt=prompt,
-                prompt_len=len(tokenizer(prompt)),
+                prompt_len=len(tokenizer(prompt)['input_ids']),
                 expected_output_len=args.output_len,
             )
         requests.append(request)
