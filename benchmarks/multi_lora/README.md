@@ -1,5 +1,12 @@
 ## Quick Start
 
+### Setup
+
+```bash
+git clone ...
+cd vLLM-Multi-LoRA-Support-Layer/    # work dir
+```
+
 ### 1. Deploy
 
 Both deploy scripts accept an optional `max_loras` argument to control how many LoRA adapters can be kept in GPU memory simultaneously.
